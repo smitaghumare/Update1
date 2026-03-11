@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tree Of Us - Ultimate</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root { --primary: #1b4332; --secondary: #40916c; --bg: #f8f9fa; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; font-family: 'Poppins', sans-serif; background: var(--bg); color: #2d3436; }
+        
+        /* Auth Screen */
+        .overlay { position: fixed; inset: 0; background: var(--primary); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .card { background: white; padding: 30px; border-radius: 30px; width: 100%; max-width: 380px; text-align: center; }
+
+        .page { display: none; padding: 20px 20px 160px 20px; height: 100vh; overflow-y: auto; box-sizing: border-box; }
+        .page.active { display: block; }
+        
+        .form-group { margin-bottom: 20px; text-align: left; }
+        label { font-size: 13px; font-weight: 600; color: var(--primary); display: block; margin-bottom: 8px; }
+        input, select { width: 100%; padding: 16px; border: 2px solid #edf2f7; border-radius: 15px; font-size: 16px; box-sizing: border-box; }
+        
+        .btn-main { background: var(--primary); color: white; border: none; width: 100%; padding: 20px; border-radius: 20px; font-weight: 600; font-size: 16px; cursor: pointer; margin-top: 10px; }
+
+        /* Tree Styles */
+        #tree-container { width: 100%; height: 65vh; background: white; border-radius: 25px; border: 1px solid #e2e8f0; overflow: auto; }
+        .link { fill: none; stroke: #cbd5e0; stroke-width: 2.5px; }
+
+        /* Bottom Nav */
+        .bottom-nav { position: fixed; bottom: 0; width: 100%; height: 90px; background: white; display: flex; justify-content: space-around; align-items: center; box-shadow: 0 -10px 30px rgba(0,0,0,0.05); border-top-left-radius: 35px; border-top-right-radius: 35px; z-index: 1000; }
+        .nav-item { text-align: center; font-size: 12px; color: #94a3b8; flex: 1; padding: 10px; }
+        .nav-item.active { color: var(--primary); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="auth-overlay" class="overlay">
+        <div class="card">
+            <h2 style="color:var(--primary);">Tree Of Us</h2>
+            <input type="text" id="username" placeholder="Username">
+            <input type="password" id="password" placeholder="Password" style="margin-top:10px;">
+            <button class="btn-main" onclick="handleAuth()">Access Archive</button>
+            <button class="btn-main" style="background:#cc0000; margin-top:30px; font-size:12px; padding:10px;" onclick="clearAllData()">⚠️ Reset/Clear App Quota</button>
+        </div>
+    </div>
+
+    <div id="main-app" style="display:none;">
+        <header style="padding:20px; background:white; display:flex; justify-content:space-between; border-bottom:1px solid #f1f5f9;">
+            <h3 style="margin:0; color:var(--primary);">Family Tree</h3>
+            <button onclick="downloadTree()" style="background:var(--secondary); color:white; border:none; padding:8px 12px; border-radius:10px; font-size:11px;">Save PNG</button>
+        </header>
+
+        <div id="tab-tree" class="page active">
+            <div id="tree-container"></div>
+        </div>
+
+        <div id="tab-add" class="page">
+            <h2 style="color:var(--primary);">New Member</h2>
+            <center>
+                <div id="photo-p" onclick="document.getElementById('mFile').click()" style="width:100px; height:100px; border-radius:50%; background:#f1f5f9; display:flex; align-items:center; justify-content:center; overflow:hidden; border:2px dashed #cbd5e0; margin-bottom:25px;">📸</div>
+                <input type="file" id="mFile" hidden onchange="processPhoto(this)">
+            </center>
+
+            <div class="form-group"><label>Full Name</label><input type="text" id="mName" placeholder="Name"></div>
+            <div class="form-group"><label>Relation</label>
+                <select id="mRelation">
+                    <option value="child">Child / Descendant</option>
+                    <option value="spouse">Spouse / Wife / Husband</option>
+                </select>
+            </div>
+            <div class="form-group"><label>Parent (Leave empty for Root)</label><select id="mParent"><option value="">Is Root Founder</option></select></div>
+            <div class="form-group"><label>Education</label><input type="text" id="mEdu" placeholder="School"></div>
+            <div class="form-group"><label>Profession</label><input type="text" id="mProf" placeholder="Job"></div>
+            
+            <button class="btn-main" onclick="saveMember()">Confirm & Save</button>
+        </div>
+
+        <div id="tab-list" class="page">
+            <h2 style="color:var(--primary);">Directory</h2>
+            <div id="member-directory"></div>
+        </div>
+
+        <nav class="bottom-nav">
+            <div class="nav-item active" onclick="showTab('tree', this)"><div>🌳</div>Tree</div>
+            <div class="nav-item" onclick="showTab('add', this)"><div>➕</div>Add</div>
+            <div class="nav-item" onclick="showTab('list', this)"><div>👥</div>Directory</div>
+        </nav>
+    </div>
+
+    <script>
+        const DB_NAME = 'ToU_Final_Fixed';
+        let db = JSON.parse(localStorage.getItem(DB_NAME)) || { users: {}, members: [] };
+        let compressedImg = "";
+
+        function clearAllData() {
+            if(confirm("This will delete all saved members to clear space. Continue?")) {
+                localStorage.clear();
+                location.reload();
+            }
+        }
+
+        function handleAuth() {
+            const u = document.getElementById('username').value.trim(), p = document.getElementById('password').value.trim();
+            if(!u || !p) return alert("Required");
+            if(db.users[u] && db.users[u] !== p) return alert("Wrong password");
+            db.users[u] = p; saveDB();
+            document.getElementById('auth-overlay').style.display = 'none';
+            document.getElementById('main-app').style.display = 'block';
+            refreshUI();
+        }
+
+        // PHOTO COMPRESSOR (Fixes the Quota Error)
+        function processPhoto(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const img = new Image();
+                    img.src = e.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        // Resize to small profile size
+                        canvas.width = 150; canvas.height = 150;
+                        ctx.drawImage(img, 0, 0, 150, 150);
+                        compressedImg = canvas.toDataURL('image/jpeg', 0.7); // Low quality to save space
+                        document.getElementById('photo-p').innerHTML = `<img src="${compressedImg}" style="width:100%; height:100%; object-fit:cover;">`;
+                    };
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        function saveMember() {
+            const name = document.getElementById('mName').value.trim();
+            if(!name) return alert("Enter name");
+
+            const member = {
+                id: "M" + Date.now(),
+                name: name,
+                parent: document.getElementById('mParent').value,
+                relation: document.getElementById('mRelation').value,
+                edu: document.getElementById('mEdu').value,
+                prof: document.getElementById('mProf').value,
+                photo: compressedImg
+            };
+
+            try {
+                db.members.push(member);
+                saveDB();
+                alert("Success!");
+                compressedImg = ""; document.getElementById('mName').value = "";
+                refreshUI();
+                showTab('tree', document.querySelectorAll('.nav-item')[0]);
+            } catch(e) {
+                alert("Storage still full. Please use the 'Reset App Quota' button on the login screen.");
+            }
+        }
+
+        function refreshUI() {
+            const p = document.getElementById('mParent'), dir = document.getElementById('member-directory');
+            p.innerHTML = '<option value="">None (Root Founder)</option>';
+            dir.innerHTML = "";
+            db.members.forEach(m => {
+                p.innerHTML += `<option value="${m.id}">${m.name}</option>`;
+                dir.innerHTML += `<div style="display:flex; align-items:center; background:white; padding:15px; margin-bottom:10px; border-radius:15px;"><img src="${m.photo || ''}" style="width:50px; height:50px; border-radius:50%; margin-right:15px;"><div><strong>${m.name}</strong><br><small>${m.prof || 'Member'}</small></div></div>`;
+            });
+            renderTree();
+        }
+
+        function renderTree() {
+            const container = document.getElementById('tree-container'); 
+            container.innerHTML = "";
+            if(db.members.length === 0) return;
+
+            const width = 1000, height = 600;
+            const svg = d3.select("#tree-container").append("svg").attr("width", width).attr("height", height).append("g").attr("transform", "translate(50,50)");
+            
+            try {
+                const stratify = d3.stratify().id(d => d.id).parentId(d => d.parent);
+                const root = stratify(db.members);
+                d3.tree().size([width - 200, height - 200])(root);
+
+                svg.selectAll(".link").data(root.links()).enter().append("path").attr("class", "link").attr("d", d3.linkVertical().x(d => d.x).y(d => d.y));
+
+                const node = svg.selectAll(".node").data(root.descendants()).enter().append("g").attr("transform", d => `translate(${d.x},${d.y})`);
+                node.append("circle").attr("r", 30).style("fill", "white").style("stroke", "#1b4332");
+                node.append("clipPath").attr("id", d => "c-"+d.id).append("circle").attr("r", 28);
+                node.append("image").attr("xlink:href", d => d.data.photo || "").attr("x",-28).attr("y",-28).attr("width",56).attr("height",56).attr("clip-path", d => "url(#c-"+d.id+")");
+                node.append("text").attr("dy", 45).attr("text-anchor", "middle").text(d => d.data.name).style("font-size", "12px");
+            } catch(e) { container.innerHTML = "<p style='padding:40px; text-align:center;'>Add a Root member first!</p>"; }
+        }
+
+        function saveDB() { localStorage.setItem(DB_NAME, JSON.stringify(db)); }
+        function downloadTree() {
+            html2canvas(document.querySelector("#tree-container")).then(canvas => {
+                const a = document.createElement('a'); a.download = 'Tree.png'; a.href = canvas.toDataURL(); a.click();
+            });
+        }
+        function showTab(id, el) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById('tab-'+id).classList.add('active');
+            el.classList.add('active');
+            if(id === 'tree') renderTree();
+        }
+    </script>
+</body>
+</html>
